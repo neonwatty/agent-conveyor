@@ -6161,6 +6161,9 @@ function runQaScenario(scenario: string, context: QaRunContext): QaRunReceipt {
   if (scenario === "ralph-loop-guardrails") {
     return qaRunRalphLoopGuardrails(context);
   }
+  if (scenario === "setup-bundle-dogfood") {
+    return qaRunSetupBundleDogfood(context);
+  }
   if (scenario === "generic-loop-template") {
     return qaRunEvidenceTemplate(context, {
       scenario,
@@ -6201,6 +6204,255 @@ function runQaScenario(scenario: string, context: QaRunContext): QaRunReceipt {
     return qaRunAdversarialTriggers(context);
   }
   throw new Error(`Unsupported QA run scenario: ${scenario}`);
+}
+
+function qaRunSetupBundleDogfood(context: QaRunContext): QaRunReceipt {
+  const slug = randomUUID().slice(0, 8);
+  const fixtureRepo = createQaSetupBundleFixtureRepo(context, slug);
+  const checks: Array<Record<string, unknown>> = [];
+  const generatedTasks: QaGeneratedTask[] = [];
+  const codexHomeMissing = join(dirname(context.dbPath), "qa-artifacts", "setup-bundle-dogfood", slug, "codex-home-missing");
+  const codexHomeReady = join(dirname(context.dbPath), "qa-artifacts", "setup-bundle-dogfood", slug, "codex-home-ready");
+  mkdirSync(codexHomeMissing, { recursive: true });
+  for (const skill of ["goal-prep", "codex-review", "requesting-code-review", "receiving-code-review", "security-diff-scan", "superpowers:requesting-code-review", "superpowers:receiving-code-review"]) {
+    const parts = skill.split(":");
+    const dir = parts.length === 2 ? parts[1] : skill;
+    const skillDir = parts.length === 2
+      ? join(codexHomeReady, "plugins", "cache", parts[0] ?? "plugin", parts[0] ?? "plugin", "1.0.0", "skills", dir)
+      : join(codexHomeReady, "skills", dir);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---\nname: ${skill}\n---\n# ${skill}\n`);
+  }
+
+  const presets = ["autonomous_ship_it", "test_coverage_ralph", "ux_polish_ralph", "pr_ci_merge_ralph"];
+  const previewSummaries: Array<Record<string, unknown>> = [];
+  for (const preset of presets) {
+    const taskName = `qa-setup-${preset}-${slug}`;
+    const created = runQaRuntimeJson(context, ["tasks", "--create", taskName, "--goal", `Dogfood setup preset ${preset}.`, "--path", context.dbPath, "--json"]);
+    generatedTasks.push({ suffix: preset, task_id: String(created.id), task_name: taskName });
+    const before = qaSetupBundleCount(context);
+    const preview = runQaRuntimeJson(context, [
+      "setup-bundle",
+      "preview",
+      taskName,
+      "--preset",
+      preset,
+      "--codex-home",
+      codexHomeReady,
+      "--path",
+      context.dbPath,
+      "--json",
+    ]);
+    const after = qaSetupBundleCount(context);
+    qaRequire(before === after, `preview for ${preset} mutated setup_bundles`);
+    previewSummaries.push({
+      draft_hash: preview.draft_hash,
+      ok: (preview.preflight as { ok?: boolean } | undefined)?.ok,
+      preset,
+    });
+  }
+  checks.push({
+    name: "all_preset_previews_are_read_only",
+    previews: previewSummaries,
+    status: "passed",
+  });
+
+  const blockedTask = `qa-setup-blocked-${slug}`;
+  const blockedCreated = runQaRuntimeJson(context, ["tasks", "--create", blockedTask, "--goal", "Missing Superpowers review backend should block.", "--path", context.dbPath, "--json"]);
+  generatedTasks.push({ suffix: "missing-superpowers", task_id: String(blockedCreated.id), task_name: blockedTask });
+  const blocked = runQaRuntimeExpectExit(context, [
+    "setup-bundle",
+    "apply",
+    blockedTask,
+    "--preset",
+    "custom",
+    "--planning-backend",
+    "direct_prompt",
+    "--pr-review-backend",
+    "superpowers",
+    "--pr-review-required",
+    "--codex-home",
+    codexHomeMissing,
+    "--approve",
+    "--path",
+    context.dbPath,
+    "--json",
+  ], 1);
+  qaRequire(blocked.blocked === true, "missing backend apply did not report blocked=true");
+  qaRequire(qaManagerConfigCount(context, blockedTask) === 0, "blocked setup created manager config");
+  checks.push({
+    blocked,
+    correlation_id: "setup-bundle-dogfood-missing-backend",
+    name: "missing_superpowers_review_backend_blocks_before_launch",
+    status: "passed",
+  });
+
+  const appliedTask = `qa-setup-applied-${slug}`;
+  const appliedCreated = runQaRuntimeJson(context, ["tasks", "--create", appliedTask, "--goal", "Apply autonomous setup bundle.", "--path", context.dbPath, "--json"]);
+  generatedTasks.push({ suffix: "applied-ship-it", task_id: String(appliedCreated.id), task_name: appliedTask });
+  const apply = runQaRuntimeJson(context, [
+    "setup-bundle",
+    "apply",
+    appliedTask,
+    "--preset",
+    "autonomous_ship_it",
+    "--codex-home",
+    codexHomeReady,
+    "--approve",
+    "--path",
+    context.dbPath,
+    "--json",
+  ]);
+  qaRequire(apply.blocked === false, "autonomous apply reported blocked");
+  qaRequire(qaManagerConfigCount(context, appliedTask) === 1, "autonomous apply did not create one manager config");
+  checks.push({
+    name: "autonomous_ship_it_apply_persists_setup_and_manager_config",
+    setup_bundle: apply.setup_bundle,
+    status: "passed",
+  });
+
+  const show = runQaRuntimeJson(context, ["setup-bundle", "show", appliedTask, "--path", context.dbPath, "--json"]);
+  const appliedBundle = apply.setup_bundle as { approved_hash?: string; id?: string; policy?: { workers?: { count?: number } } };
+  const shownBundle = show as { approved_hash?: string; id?: string; policy?: { workers?: { count?: number } } };
+  qaRequire(shownBundle.id === appliedBundle.id, "show returned a different setup bundle id");
+  qaRequire(shownBundle.approved_hash === appliedBundle.approved_hash, "show returned a different approved hash");
+  checks.push({
+    approved_hash: shownBundle.approved_hash,
+    name: "setup_bundle_show_matches_applied_hash",
+    status: "passed",
+  });
+
+  qaRequire(shownBundle.policy?.workers?.count === 1, "setup bundle unexpectedly persisted worker-set count");
+  checks.push({
+    name: "worker_set_intent_is_handoff_only",
+    persisted_worker_count: shownBundle.policy?.workers?.count,
+    recommended_handoff: "conveyor-create-worker-set after setup-bundle show confirms state=applied",
+    status: "passed",
+  });
+
+  qaRequire(qaSessionCount(context) === 0, "setup dogfood created sessions");
+  checks.push({
+    name: "no_sessions_created_during_dogfood",
+    session_count: 0,
+    status: "passed",
+  });
+
+  return {
+    artifacts: {
+      codex_home_missing: codexHomeMissing,
+      codex_home_ready: codexHomeReady,
+      db_path: context.dbPath,
+      fixture_repo: fixtureRepo,
+    },
+    checks,
+    generated_at: new Date().toISOString(),
+    generated_tasks: generatedTasks,
+    live_sandbox: {
+      enabled: false,
+      reason: "CI-safe setup-bundle dogfood does not perform GitHub side effects or launch Codex sessions.",
+    },
+    replay_commands: [
+      `conveyor setup-bundle preview ${appliedTask} --preset autonomous_ship_it --path ${context.dbPath} --json`,
+      `conveyor setup-bundle show ${appliedTask} --path ${context.dbPath} --json`,
+      `conveyor pair --task ${appliedTask} --worker-name dogfood-worker --manager-name dogfood-manager --cwd ${fixtureRepo} --path ${context.dbPath} --dry-run --json`,
+      "Use conveyor-create-worker-set only after setup-bundle show confirms state=applied.",
+      "Use docs/qa/setup-bundle-dogfood.md for the explicit live GitHub sandbox drill.",
+    ],
+    result: "passed",
+    scenario: "setup-bundle-dogfood",
+  };
+}
+
+function createQaSetupBundleFixtureRepo(context: QaRunContext, slug: string): string {
+  const repo = join(dirname(context.dbPath), "qa-artifacts", "setup-bundle-dogfood", slug, "fixture-repo");
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "package.json"), `${JSON.stringify({
+    name: "setup-bundle-dogfood-fixture",
+    private: true,
+    scripts: { test: "node src/check.mjs" },
+    type: "module",
+  }, null, 2)}\n`);
+  writeFileSync(join(repo, "src", "check.mjs"), "console.log('setup-bundle dogfood fixture ok');\n");
+  writeFileSync(join(repo, "README.md"), "# Setup Bundle Dogfood Fixture\n\nDisposable local fixture repo for CI-safe dogfood.\n");
+  const init = runCommandForQa(context, ["git", "init", "-b", "main"], repo);
+  qaRequire(init.returncode === 0, `fixture git init failed: ${init.stderr}`);
+  const add = runCommandForQa(context, ["git", "add", "."], repo);
+  qaRequire(add.returncode === 0, `fixture git add failed: ${add.stderr}`);
+  const commit = runCommandForQa(context, ["git", "-c", "user.name=Agent Conveyor QA", "-c", "user.email=qa@example.invalid", "commit", "-m", "fixture"], repo);
+  qaRequire(commit.returncode === 0, `fixture git commit failed: ${commit.stderr}`);
+  return repo;
+}
+
+function runCommandForQa(context: QaRunContext, args: string[], cwd: string): { returncode: number; stderr: string; stdout: string } {
+  const child = spawnSync(args[0], args.slice(1), {
+    cwd,
+    encoding: "utf8",
+    env: context.runtimeOptions.env,
+  });
+  return {
+    returncode: child.status ?? 1,
+    stderr: child.stderr ?? "",
+    stdout: child.stdout ?? "",
+  };
+}
+
+function runQaRuntimeJson(context: QaRunContext, args: string[], stdin?: string): Record<string, unknown> {
+  const result = runTypescriptRuntimeCommand({
+    ...context.runtimeOptions,
+    args,
+    env: {
+      ...(context.runtimeOptions.env ?? {}),
+      AGENT_CONVEYOR_TS_RUNTIME: "1",
+    },
+    stdin,
+  });
+  qaRequire(result.exitCode === 0, `${args.join(" ")} failed: ${result.stderr ?? result.stdout ?? ""}`);
+  return JSON.parse(result.stdout ?? "{}") as Record<string, unknown>;
+}
+
+function runQaRuntimeExpectExit(context: QaRunContext, args: string[], expectedExitCode: number): Record<string, unknown> {
+  const result = runTypescriptRuntimeCommand({
+    ...context.runtimeOptions,
+    args,
+    env: {
+      ...(context.runtimeOptions.env ?? {}),
+      AGENT_CONVEYOR_TS_RUNTIME: "1",
+    },
+  });
+  qaRequire(result.exitCode === expectedExitCode, `${args.join(" ")} exited ${result.exitCode}, expected ${expectedExitCode}: ${result.stderr ?? result.stdout ?? ""}`);
+  return JSON.parse(result.stdout ?? "{}") as Record<string, unknown>;
+}
+
+function qaSetupBundleCount(context: QaRunContext): number {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    return (database.prepare("select count(*) as count from setup_bundles").get() as { count: number }).count;
+  } finally {
+    database.close();
+  }
+}
+
+function qaSessionCount(context: QaRunContext): number {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    return (database.prepare("select count(*) as count from sessions").get() as { count: number }).count;
+  } finally {
+    database.close();
+  }
+}
+
+function qaManagerConfigCount(context: QaRunContext, taskName: string): number {
+  const database = openDatabaseSync(context.dbPath);
+  try {
+    initializeDatabaseSync(database);
+    const row = database.prepare("select id from tasks where name = ? limit 1").get(taskName) as { id: string } | undefined;
+    qaRequire(row !== undefined, `unknown task ${taskName}`);
+    return (database.prepare("select count(*) as count from manager_configs where task_id = ?").get(row.id) as { count: number }).count;
+  } finally {
+    database.close();
+  }
 }
 
 function qaRunRalphLoopGuardrails(context: QaRunContext): QaRunReceipt {

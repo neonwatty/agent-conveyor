@@ -4936,6 +4936,58 @@ test("TypeScript runtime handles qa-plan by default", () => {
   assert.match(extraArg.stderr ?? "", /Unexpected argument: extra/);
 });
 
+test("TypeScript runtime qa-run setup-bundle-dogfood writes CI-safe receipt", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-dogfood."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const receiptPath = join(root, "setup-bundle-dogfood-receipt.json");
+    const result = runTypescriptRuntimeCommand({
+      args: ["qa-run", "setup-bundle-dogfood", "--path", dbPath, "--receipt-output", receiptPath, "--json"],
+      env: {},
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(existsSync(receiptPath));
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
+      artifacts: { db_path: string; fixture_repo: string };
+      checks: Array<{ name: string; status: string }>;
+      generated_tasks: Array<{ task_name: string }>;
+      live_sandbox: { enabled: boolean; reason: string };
+      replay_commands: string[];
+      result: string;
+      scenario: string;
+    };
+    assert.equal(receipt.scenario, "setup-bundle-dogfood");
+    assert.equal(receipt.result, "passed");
+    assert.equal(receipt.artifacts.db_path, dbPath);
+    assert.ok(existsSync(receipt.artifacts.fixture_repo));
+    assert.equal(receipt.live_sandbox.enabled, false);
+    assert.match(receipt.live_sandbox.reason, /CI-safe/);
+    for (const name of [
+      "all_preset_previews_are_read_only",
+      "missing_superpowers_review_backend_blocks_before_launch",
+      "autonomous_ship_it_apply_persists_setup_and_manager_config",
+      "setup_bundle_show_matches_applied_hash",
+      "worker_set_intent_is_handoff_only",
+      "no_sessions_created_during_dogfood",
+    ]) {
+      assert.ok(receipt.checks.some((check) => check.name === name && check.status === "passed"), name);
+    }
+    assert.ok(receipt.replay_commands.some((command) => command.includes("conveyor setup-bundle preview")));
+    assert.ok(receipt.replay_commands.some((command) => command.includes("conveyor setup-bundle show")));
+    assert.ok(receipt.replay_commands.some((command) => command.includes("conveyor pair") && command.includes("--dry-run")));
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((proofDb.prepare("select count(*) as count from sessions").get() as { count: number }).count, 0);
+      assert.equal((proofDb.prepare("select count(*) as count from setup_bundles").get() as { count: number }).count >= 1, true);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript runtime qa-run writes deterministic receipts and rejects dirty continue queues by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-qa-run."));
   try {
