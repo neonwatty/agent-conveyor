@@ -44,9 +44,13 @@ inspection while Dispatch is writing to the same `--path` database.
 
 `conveyor setup-bundle` is the preferred high-level setup surface when the
 operator needs planning, Ralph-style loops, PR review rigor, what's-next
-nudging, permissions, and evidence gates configured together. Manager recipes
-remain the reusable preset metadata; setup bundles compile those recipes into a
-locked, preflighted ledger record before manager/worker launch.
+nudging, permissions, and evidence gates configured together. The primary UX is
+a Codex-session setup conversation driven by the `conveyor-setup-bundle` skill:
+the agent asks only the missing setup questions, previews the bundle, halts on
+missing required tools, asks for approval, applies the bundle, and reads the
+ledger back with `setup-bundle show`. Manager recipes remain the reusable preset
+metadata; setup bundles compile those recipes into a locked, preflighted ledger
+record before manager/worker launch.
 
 Use:
 
