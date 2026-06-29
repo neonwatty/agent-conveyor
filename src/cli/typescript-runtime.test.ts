@@ -1107,6 +1107,97 @@ test("setup-bundle CLI rejects invalid enum and iteration options", () => {
   }
 });
 
+test("setup-bundle preview blocks configurable required PR review when skill is missing", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-cli-setup-bundle-review-required."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const codexHome = join(root, "codex-home");
+    const created = runTypescriptRuntimeCommand({
+      args: ["tasks", "--create", "review-required-task", "--goal", "Require review rigor.", "--path", dbPath, "--json"],
+      env: {},
+    });
+    assert.equal(created.exitCode, 0, created.stderr);
+
+    const preview = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "preview",
+        "review-required-task",
+        "--preset",
+        "custom",
+        "--pr-review-backend",
+        "superpowers",
+        "--pr-review-required",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(preview.exitCode, 0, preview.stderr);
+    const payload = JSON.parse(preview.stdout ?? "{}") as {
+      preflight: { missing_required: string[]; ok: boolean };
+      policy: { pr_review: { backend: string; required: boolean; required_skills: string[] } };
+    };
+    assert.equal(payload.policy.pr_review.backend, "superpowers");
+    assert.equal(payload.policy.pr_review.required, true);
+    assert.ok(payload.policy.pr_review.required_skills.includes("superpowers:requesting-code-review"));
+    assert.equal(payload.preflight.ok, false);
+    assert.ok(payload.preflight.missing_required.includes("superpowers:requesting-code-review"));
+
+    let proofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((proofDb.prepare("select count(*) as count from setup_bundles").get() as { count: number }).count, 0);
+    } finally {
+      proofDb.close();
+    }
+
+    const apply = runTypescriptRuntimeCommand({
+      args: [
+        "setup-bundle",
+        "apply",
+        "review-required-task",
+        "--preset",
+        "custom",
+        "--pr-review-backend",
+        "superpowers",
+        "--pr-review-required",
+        "--approve",
+        "--codex-home",
+        codexHome,
+        "--path",
+        dbPath,
+        "--json",
+      ],
+      env: {},
+    });
+    assert.equal(apply.exitCode, 1, apply.stderr);
+    const appliedPayload = JSON.parse(apply.stdout ?? "{}") as {
+      blocked: boolean;
+      launched: boolean;
+      missing_required: string[];
+      setup_bundle: { blocked_reason: string | null; state: string };
+    };
+    assert.equal(appliedPayload.blocked, true);
+    assert.equal(appliedPayload.launched, false);
+    assert.ok(appliedPayload.missing_required.includes("superpowers:requesting-code-review"));
+    assert.equal(appliedPayload.setup_bundle.state, "blocked");
+    assert.match(appliedPayload.setup_bundle.blocked_reason ?? "", /missing required backend/);
+
+    proofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((proofDb.prepare("select count(*) as count from setup_bundles where state = 'blocked'").get() as { count: number }).count, 1);
+      assert.equal((proofDb.prepare("select count(*) as count from manager_configs").get() as { count: number }).count, 0);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("setup-bundle preview supports test coverage and UX Ralph loops", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-ralph."));
   const codexHome = makeCodexHomeWithSkills([]);
@@ -11124,6 +11215,16 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.match(setupBundleSkill, /conveyor setup-bundle apply/);
     assert.match(setupBundleSkill, /conveyor setup-bundle show/);
     assert.match(setupBundleSkill, /If a required backend is missing, stop\. Do not create sessions/);
+    assert.match(setupBundleSkill, /Conversation Protocol/);
+    assert.match(setupBundleSkill, /Intake Questions/);
+    assert.match(setupBundleSkill, /Review Rigor/);
+    assert.match(setupBundleSkill, /What's Next Nudging/);
+    assert.match(setupBundleSkill, /Ralph Loop/);
+    assert.match(setupBundleSkill, /--pr-review-backend/);
+    assert.match(setupBundleSkill, /--planning-backend/);
+    assert.match(setupBundleSkill, /--whats-next-max-iterations/);
+    assert.match(setupBundleSkill, /--loop-preset/);
+    assert.match(setupBundleSkill, /Do not launch manager or worker sessions until[\s\S]*conveyor setup-bundle show[\s\S]*confirms an applied bundle/);
     const installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8")) as { name: string; version: string };
     assert.equal(installedManifest.name, "agent-conveyor");
     assert.equal(installedManifest.version, PACKAGE_VERSION);

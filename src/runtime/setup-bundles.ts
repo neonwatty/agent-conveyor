@@ -574,7 +574,7 @@ function prReviewBackendRequiredSkills(backend: PrReviewBackend): string[] {
     case "security":
       return ["security-diff-scan"];
     case "superpowers":
-      return ["requesting-code-review", "receiving-code-review"];
+      return ["superpowers:requesting-code-review", "superpowers:receiving-code-review"];
     case "custom":
     case "off":
       return [];
