@@ -736,6 +736,7 @@ interface ParsedRuntimeArgs {
     includeTranscripts: boolean;
     all: boolean;
     allowAdditionalReceipt: boolean;
+    allowGithubSideEffects: boolean;
     action: string | null;
     automationId: string | null;
     artifactPath: string | null;
@@ -743,6 +744,7 @@ interface ParsedRuntimeArgs {
     assignment: string | null;
     asRole: "all" | "manager" | "reviewer" | "worker";
     attempts: boolean;
+    branchPrefix: string | null;
     briefJson: string | null;
     json: boolean;
     activeOnly: boolean;
@@ -793,6 +795,7 @@ interface ParsedRuntimeArgs {
     fromStdin: boolean;
     failureMode: string | null;
     goal: string | null;
+    githubRepo: string | null;
     instructions: string | null;
     keepLatest: number;
     key: string;
@@ -883,6 +886,8 @@ interface ParsedRuntimeArgs {
     maxStorageBytes: number | null;
     maxUnfinishedCommands: number;
     managerStaleSeconds: number;
+    maxPrs: number | null;
+    maxRuntimeMinutes: number | null;
     workerctlPath: string;
     newest: boolean;
     zip: boolean;
@@ -1021,6 +1026,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     includeTranscripts: false,
     all: false,
     allowAdditionalReceipt: false,
+    allowGithubSideEffects: false,
     action: null,
     automationId: null,
     artifactPath: null,
@@ -1028,6 +1034,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     assignment: null,
     asRole: "all",
     attempts: false,
+    branchPrefix: null,
     briefJson: null,
     json: false,
     activeOnly: false,
@@ -1078,6 +1085,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     fromText: null,
     fromWorkerResponse: null,
     goal: null,
+    githubRepo: null,
     instructions: null,
     keepLatest: 20,
     key: "C-c",
@@ -1168,6 +1176,8 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
     maxStorageBytes: null,
     maxUnfinishedCommands: 0,
     managerStaleSeconds: DEFAULT_STATUS_STALE_SECONDS,
+    maxPrs: null,
+    maxRuntimeMinutes: null,
     workerctlPath: "conveyor",
     newest: false,
     zip: false,
@@ -1315,6 +1325,11 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "Unsupported TypeScript runtime option: --allow-additional-receipt", explicit, flags, passthroughArgs, task };
       }
       flags.allowAdditionalReceipt = true;
+    } else if (arg === "--allow-github-side-effects") {
+      if (command !== "qa-run") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --allow-github-side-effects", explicit, flags, passthroughArgs, task };
+      }
+      flags.allowGithubSideEffects = true;
     } else if (arg === "--active") {
       flags.active = true;
     } else if (arg === "--add") {
@@ -1697,6 +1712,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: value.error, explicit, flags, task };
       }
       flags.goal = value.value;
+      index += 1;
+    } else if (arg === "--github-repo") {
+      if (command !== "qa-run") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --github-repo", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.githubRepo = value.value;
       index += 1;
     } else if (arg === "--criterion") {
       if (command !== "criteria") {
@@ -2599,6 +2624,16 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       flags.manager = value.value;
       index += 1;
+    } else if (arg === "--branch-prefix") {
+      if (command !== "qa-run") {
+        return { command, enabled, error: "Unsupported TypeScript runtime option: --branch-prefix", explicit, flags, task };
+      }
+      const value = valueAfter(queue, index, arg);
+      if (value.error) {
+        return { command, enabled, error: value.error, explicit, flags, task };
+      }
+      flags.branchPrefix = value.value;
+      index += 1;
     } else if (
       arg === "--worker-codex-app-thread-id"
       || arg === "--worker-codex-app-thread-title"
@@ -3432,7 +3467,7 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
       }
       index += 1;
     } else if (arg === "--max-iterations") {
-      if (command !== "create-disposable-binding" && command !== "loop-templates" && command !== "ralph-loop-presets") {
+      if (command !== "create-disposable-binding" && command !== "loop-templates" && command !== "ralph-loop-presets" && command !== "qa-run") {
         return { command, enabled, error: "Unsupported TypeScript runtime option: --max-iterations", explicit, flags, task };
       }
       const parsedValue = valueAfter(queue, index, arg);
@@ -3444,6 +3479,24 @@ function parseRuntimeArgs(args: readonly string[], env: NodeJS.ProcessEnv): Pars
         return { command, enabled, error: "--max-iterations must be an integer.", explicit, flags, task };
       }
       flags.maxIterations = value;
+      index += 1;
+    } else if (arg === "--max-prs" || arg === "--max-runtime-minutes") {
+      if (command !== "qa-run") {
+        return { command, enabled, error: `Unsupported TypeScript runtime option: ${arg}`, explicit, flags, task };
+      }
+      const parsedValue = valueAfter(queue, index, arg);
+      if (parsedValue.error) {
+        return { command, enabled, error: parsedValue.error, explicit, flags, task };
+      }
+      const value = Number(parsedValue.value);
+      if (!Number.isInteger(value) || value <= 0) {
+        return { command, enabled, error: `${arg} must be a positive integer.`, explicit, flags, task };
+      }
+      if (arg === "--max-prs") {
+        flags.maxPrs = value;
+      } else {
+        flags.maxRuntimeMinutes = value;
+      }
       index += 1;
     } else if (arg === "--current-iteration") {
       if (command !== "create-disposable-binding" && command !== "loop-templates" && command !== "ralph-loop-presets") {
@@ -5726,7 +5779,19 @@ function runQaRunCommand(
   options: { cwd?: string; env?: NodeJS.ProcessEnv },
 ): TypescriptRuntimeResult {
   const unsupported = unsupportedLoopCommandOptions(parsed, {
-    allowedFlags: new Set(["dispatcherId", "json", "path", "receiptOutput", "subtype"]),
+    allowedFlags: new Set([
+      "allowGithubSideEffects",
+      "branchPrefix",
+      "dispatcherId",
+      "githubRepo",
+      "json",
+      "maxIterations",
+      "maxPrs",
+      "maxRuntimeMinutes",
+      "path",
+      "receiptOutput",
+      "subtype",
+    ]),
     commandName: "qa-run",
   });
   if (unsupported) {
@@ -5738,6 +5803,15 @@ function runQaRunCommand(
   const scenario = parsed.flags.subtype ?? "ralph-loop-guardrails";
   if (!isSupportedQaRunScenario(scenario)) {
     return errorResult(`Unsupported QA run scenario: ${scenario}`);
+  }
+  const hasLiveSandboxFlag = parsed.flags.allowGithubSideEffects
+    || parsed.flags.githubRepo !== null
+    || parsed.flags.branchPrefix !== null
+    || parsed.flags.maxPrs !== null
+    || parsed.flags.maxIterations !== null
+    || parsed.flags.maxRuntimeMinutes !== null;
+  if (scenario !== "setup-bundle-live-sandbox" && hasLiveSandboxFlag) {
+    return errorResult("Live sandbox flags are only supported for qa-run setup-bundle-live-sandbox.");
   }
   if (scenario === "generic-loop-template-browser") {
     try {
@@ -5755,6 +5829,14 @@ function runQaRunCommand(
   const receipt = runQaScenario(scenario, {
     dbPath,
     dispatcherId,
+    qaOptions: {
+      allowGithubSideEffects: parsed.flags.allowGithubSideEffects,
+      branchPrefix: parsed.flags.branchPrefix,
+      githubRepo: parsed.flags.githubRepo,
+      maxIterations: parsed.flags.maxIterations,
+      maxPrs: parsed.flags.maxPrs,
+      maxRuntimeMinutes: parsed.flags.maxRuntimeMinutes,
+    },
     receiptOutput,
     runtimeOptions: options,
   });
@@ -6116,8 +6198,18 @@ function renderQaPlanText(plan: QaPlan): string {
 interface QaRunContext {
   dbPath: string;
   dispatcherId: string;
+  qaOptions: QaRunOptions;
   receiptOutput: string;
   runtimeOptions: { cwd?: string; env?: NodeJS.ProcessEnv };
+}
+
+interface QaRunOptions {
+  allowGithubSideEffects: boolean;
+  branchPrefix: string | null;
+  githubRepo: string | null;
+  maxIterations: number | null;
+  maxPrs: number | null;
+  maxRuntimeMinutes: number | null;
 }
 
 interface QaGeneratedTask {
@@ -6149,9 +6241,13 @@ const SUPPORTED_QA_RUN_SCENARIOS = new Set([
   "generic-loop-template-browser",
   "ralph-loop-guardrails",
   "setup-bundle-dogfood",
+  "setup-bundle-live-sandbox",
   "ship-it-loop",
   "test-coverage-loop",
 ]);
+
+const SETUP_BUNDLE_LIVE_SANDBOX_REPO = "neonwatty/agent-conveyor-dogfood-sandbox";
+const SETUP_BUNDLE_LIVE_SANDBOX_BRANCH_PREFIX = "dogfood/";
 
 function isSupportedQaRunScenario(scenario: string): boolean {
   return SUPPORTED_QA_RUN_SCENARIOS.has(scenario);
@@ -6163,6 +6259,9 @@ function runQaScenario(scenario: string, context: QaRunContext): QaRunReceipt {
   }
   if (scenario === "setup-bundle-dogfood") {
     return qaRunSetupBundleDogfood(context);
+  }
+  if (scenario === "setup-bundle-live-sandbox") {
+    return qaRunSetupBundleLiveSandbox(context);
   }
   if (scenario === "generic-loop-template") {
     return qaRunEvidenceTemplate(context, {
@@ -6360,6 +6459,112 @@ function qaRunSetupBundleDogfood(context: QaRunContext): QaRunReceipt {
     ],
     result: "passed",
     scenario: "setup-bundle-dogfood",
+  };
+}
+
+function qaRunSetupBundleLiveSandbox(context: QaRunContext): QaRunReceipt {
+  const options = context.qaOptions;
+  if (!options.allowGithubSideEffects) {
+    throw new Error("qa-run setup-bundle-live-sandbox requires --allow-github-side-effects.");
+  }
+  if (options.githubRepo !== SETUP_BUNDLE_LIVE_SANDBOX_REPO) {
+    throw new Error(`qa-run setup-bundle-live-sandbox requires --github-repo ${SETUP_BUNDLE_LIVE_SANDBOX_REPO}.`);
+  }
+  if (options.branchPrefix !== SETUP_BUNDLE_LIVE_SANDBOX_BRANCH_PREFIX) {
+    throw new Error(`qa-run setup-bundle-live-sandbox requires --branch-prefix ${SETUP_BUNDLE_LIVE_SANDBOX_BRANCH_PREFIX}.`);
+  }
+  if (options.maxPrs !== 1) {
+    throw new Error("qa-run setup-bundle-live-sandbox requires --max-prs 1.");
+  }
+  if (options.maxIterations === null || options.maxIterations < 1 || options.maxIterations > 2) {
+    throw new Error("qa-run setup-bundle-live-sandbox requires --max-iterations between 1 and 2.");
+  }
+  if (options.maxRuntimeMinutes === null || options.maxRuntimeMinutes < 1 || options.maxRuntimeMinutes > 60) {
+    throw new Error("qa-run setup-bundle-live-sandbox requires --max-runtime-minutes between 1 and 60.");
+  }
+  const sampleTask = "setup-dogfood-live";
+  const sampleBranch = `${SETUP_BUNDLE_LIVE_SANDBOX_BRANCH_PREFIX}setup-bundle-${randomUUID().slice(0, 8)}`;
+  const replayCommands = [
+    `conveyor tasks --create ${sampleTask} --goal setup-bundle-live-sandbox --path ${context.dbPath} --json`,
+    `conveyor setup-bundle preview ${sampleTask} --preset autonomous_ship_it --pr-review-backend composite --pr-review-required --whats-next execute_bounded --whats-next-max-iterations 1 --path ${context.dbPath} --json`,
+    `conveyor setup-bundle apply ${sampleTask} --preset autonomous_ship_it --pr-review-backend composite --pr-review-required --whats-next execute_bounded --whats-next-max-iterations 1 --approve --path ${context.dbPath} --json`,
+    `conveyor setup-bundle show ${sampleTask} --path ${context.dbPath} --json`,
+    `conveyor qa-run setup-bundle-live-sandbox --allow-github-side-effects --github-repo ${SETUP_BUNDLE_LIVE_SANDBOX_REPO} --branch-prefix ${SETUP_BUNDLE_LIVE_SANDBOX_BRANCH_PREFIX} --max-prs ${options.maxPrs} --max-iterations ${options.maxIterations} --max-runtime-minutes ${options.maxRuntimeMinutes} --receipt-output ${context.receiptOutput} --path ${context.dbPath} --json`,
+  ];
+  return {
+    artifacts: {
+      db_path: context.dbPath,
+      receipt_output: context.receiptOutput,
+    },
+    checks: [
+      {
+        name: "github_side_effects_explicitly_authorized",
+        status: "passed",
+      },
+      {
+        name: "sandbox_repo_allowlisted",
+        repo: options.githubRepo,
+        status: "passed",
+      },
+      {
+        branch_prefix: options.branchPrefix,
+        name: "branch_prefix_restricted_to_dogfood",
+        sample_branch: sampleBranch,
+        status: "passed",
+      },
+      {
+        limits: {
+          max_iterations: options.maxIterations,
+          max_prs: options.maxPrs,
+          max_runtime_minutes: options.maxRuntimeMinutes,
+        },
+        name: "runtime_pr_iteration_limits_set",
+        status: "passed",
+      },
+      {
+        name: "setup_bundle_show_required_before_launch",
+        required_command: `conveyor setup-bundle show ${sampleTask} --path ${context.dbPath} --json`,
+        status: "passed",
+      },
+      {
+        name: "no_github_commands_executed_by_preflight",
+        status: "passed",
+      },
+    ],
+    execution_mode: "preflight_only",
+    final_live_receipt_requirements: [
+      "sandbox_repo_url",
+      "setup_preview_hash",
+      "applied_setup_bundle_id",
+      "approved_hash",
+      "branch_name_with_dogfood_prefix",
+      "pr_url",
+      "ci_result",
+      "pr_review_result",
+      "mergeability_result",
+      "manager_merge_decision",
+      "merge_sha",
+      "post_merge_verification",
+      "whats_next_iterations_used",
+      "adversarial_proof",
+    ],
+    generated_at: new Date().toISOString(),
+    github_commands_executed: [],
+    limits: {
+      max_iterations: options.maxIterations,
+      max_prs: options.maxPrs,
+      max_runtime_minutes: options.maxRuntimeMinutes,
+    },
+    live_sandbox: {
+      branch_prefix: options.branchPrefix,
+      enabled: true,
+      repo: options.githubRepo,
+      sample_branch: sampleBranch,
+      side_effects_authorized: true,
+    },
+    replay_commands: replayCommands,
+    result: "passed",
+    scenario: "setup-bundle-live-sandbox",
   };
 }
 

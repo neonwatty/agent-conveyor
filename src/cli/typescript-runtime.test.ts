@@ -4988,6 +4988,135 @@ test("TypeScript runtime qa-run setup-bundle-dogfood writes CI-safe receipt", ()
   }
 });
 
+test("TypeScript runtime qa-run setup-bundle-live-sandbox enforces explicit rails", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-live-sandbox."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const receiptPath = join(root, "setup-bundle-live-sandbox-receipt.json");
+    const baseArgs = [
+      "qa-run",
+      "setup-bundle-live-sandbox",
+      "--path",
+      dbPath,
+      "--receipt-output",
+      receiptPath,
+      "--json",
+    ];
+    const blocked = runTypescriptRuntimeCommand({
+      args: baseArgs,
+      env: {},
+    });
+    assert.equal(blocked.exitCode, 2);
+    assert.match(blocked.stderr ?? "", /requires --allow-github-side-effects/);
+    assert.equal(existsSync(receiptPath), false);
+
+    const unsafeRepo = runTypescriptRuntimeCommand({
+      args: [
+        ...baseArgs,
+        "--allow-github-side-effects",
+        "--github-repo",
+        "neonwatty/agent-conveyor",
+        "--branch-prefix",
+        "dogfood/",
+        "--max-prs",
+        "1",
+        "--max-iterations",
+        "2",
+        "--max-runtime-minutes",
+        "30",
+      ],
+      env: {},
+    });
+    assert.equal(unsafeRepo.exitCode, 2);
+    assert.match(unsafeRepo.stderr ?? "", /requires --github-repo neonwatty\/agent-conveyor-dogfood-sandbox/);
+
+    const unsafeBranchPrefix = runTypescriptRuntimeCommand({
+      args: [
+        ...baseArgs,
+        "--allow-github-side-effects",
+        "--github-repo",
+        "neonwatty/agent-conveyor-dogfood-sandbox",
+        "--branch-prefix",
+        "main",
+        "--max-prs",
+        "1",
+        "--max-iterations",
+        "2",
+        "--max-runtime-minutes",
+        "30",
+      ],
+      env: {},
+    });
+    assert.equal(unsafeBranchPrefix.exitCode, 2);
+    assert.match(unsafeBranchPrefix.stderr ?? "", /requires --branch-prefix dogfood\//);
+
+    const ready = runTypescriptRuntimeCommand({
+      args: [
+        ...baseArgs,
+        "--allow-github-side-effects",
+        "--github-repo",
+        "neonwatty/agent-conveyor-dogfood-sandbox",
+        "--branch-prefix",
+        "dogfood/",
+        "--max-prs",
+        "1",
+        "--max-iterations",
+        "2",
+        "--max-runtime-minutes",
+        "30",
+      ],
+      env: {},
+    });
+    assert.equal(ready.exitCode, 0, ready.stderr);
+    assert.ok(existsSync(receiptPath));
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
+      checks: Array<{ name: string; status: string }>;
+      execution_mode: string;
+      github_commands_executed: string[];
+      limits: { max_iterations: number; max_prs: number; max_runtime_minutes: number };
+      live_sandbox: { branch_prefix: string; enabled: boolean; repo: string; side_effects_authorized: boolean };
+      replay_commands: string[];
+      result: string;
+      scenario: string;
+    };
+    assert.equal(receipt.scenario, "setup-bundle-live-sandbox");
+    assert.equal(receipt.result, "passed");
+    assert.equal(receipt.execution_mode, "preflight_only");
+    assert.equal(receipt.live_sandbox.enabled, true);
+    assert.equal(receipt.live_sandbox.side_effects_authorized, true);
+    assert.equal(receipt.live_sandbox.repo, "neonwatty/agent-conveyor-dogfood-sandbox");
+    assert.equal(receipt.live_sandbox.branch_prefix, "dogfood/");
+    assert.deepEqual(receipt.limits, { max_iterations: 2, max_prs: 1, max_runtime_minutes: 30 });
+    assert.deepEqual(receipt.github_commands_executed, []);
+    for (const name of [
+      "github_side_effects_explicitly_authorized",
+      "sandbox_repo_allowlisted",
+      "branch_prefix_restricted_to_dogfood",
+      "runtime_pr_iteration_limits_set",
+      "setup_bundle_show_required_before_launch",
+      "no_github_commands_executed_by_preflight",
+    ]) {
+      assert.ok(receipt.checks.some((check) => check.name === name && check.status === "passed"), name);
+    }
+    assert.match(receipt.replay_commands[0] ?? "", /conveyor tasks --create setup-dogfood-live/);
+    assert.ok(receipt.replay_commands.some((command) => command.includes("conveyor setup-bundle preview")));
+    assert.ok(receipt.replay_commands.some((command) => command.includes("conveyor setup-bundle show")));
+    assert.ok(receipt.replay_commands.some((command) => command.includes("--branch-prefix dogfood/")));
+    const replayCreate = runTypescriptRuntimeCommand({
+      args: receipt.replay_commands[0].split(" ").slice(1),
+      env: {},
+    });
+    assert.equal(replayCreate.exitCode, 0, replayCreate.stderr);
+    const replayPreview = runTypescriptRuntimeCommand({
+      args: receipt.replay_commands[1].split(" ").slice(1),
+      env: {},
+    });
+    assert.equal(replayPreview.exitCode, 0, replayPreview.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("setup bundle dogfood docs describe local and live rails", () => {
   const guide = readFileSync("docs/qa/setup-bundle-dogfood.md", "utf8");
   assert.match(guide, /Local CI-safe dogfood/);
@@ -5003,6 +5132,18 @@ test("setup bundle dogfood docs describe local and live rails", () => {
 
   const checklist = readFileSync("docs/manual-qa-checklist.md", "utf8");
   assert.match(checklist, /setup-bundle-dogfood-receipt/);
+});
+
+test("setup bundle dogfood docs and CI include executable rails", () => {
+  const workflow = readFileSync(".github/workflows/test.yml", "utf8");
+  assert.match(workflow, /qa-run setup-bundle-dogfood/);
+  assert.match(workflow, /setup-bundle-dogfood-receipt\.json/);
+  assert.match(workflow, /actions\/upload-artifact/);
+
+  const guide = readFileSync("docs/qa/setup-bundle-dogfood.md", "utf8");
+  assert.match(guide, /qa-run setup-bundle-live-sandbox/);
+  assert.match(guide, /--github-repo neonwatty\/agent-conveyor-dogfood-sandbox/);
+  assert.match(guide, /--max-runtime-minutes 30/);
 });
 
 test("TypeScript runtime qa-run writes deterministic receipts and rejects dirty continue queues by default", () => {

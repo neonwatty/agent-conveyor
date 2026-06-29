@@ -46,5 +46,16 @@ jobs:
       - name: Run release-candidate deterministic checks
         run: scripts/rc-check --skip-live-smoke-repeat
 
+      - name: Run setup bundle dogfood QA
+        run: bin/conveyor qa-run setup-bundle-dogfood --receipt-output "$RUNNER_TEMP/setup-bundle-dogfood-receipt.json" --json
+
+      - name: Upload setup bundle dogfood receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: setup-bundle-dogfood-receipt
+          path: ${{ runner.temp }}/setup-bundle-dogfood-receipt.json
+          if-no-files-found: error
+
       - name: Run package install smoke
         run: scripts/package-smoke

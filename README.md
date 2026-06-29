@@ -1027,7 +1027,7 @@ stay out of receipts.
   `--include-content` is passed.
 - `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers|goalbuddy-conveyor|setup-bundle-dogfood|ship-it-loop>` — Print a
   repeatable manual QA checklist.
-- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|test-coverage-loop|adversarial-triggers|build-clear-loop|setup-bundle-dogfood|ship-it-loop> --receipt-output RECEIPT.json [--path DB]` —
+- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|test-coverage-loop|adversarial-triggers|build-clear-loop|setup-bundle-dogfood|setup-bundle-live-sandbox|ship-it-loop> --receipt-output RECEIPT.json [--path DB]` —
   Run a deterministic no-tmux QA harness and save a JSON receipt.
   `ralph-loop-guardrails` proves max-iteration cutoff, missing-evidence
   cutoff, fresh retry delivery after structured `adversarial_check` evidence,
@@ -1055,6 +1055,11 @@ stay out of receipts.
   ledgers, temp Codex homes, and a disposable local fixture repo. It is CI-safe:
   no GitHub side effects and no manager/worker session launch. For the live
   sandbox drill, see `docs/qa/setup-bundle-dogfood.md`.
+  `setup-bundle-live-sandbox` is an executable preflight for the live sandbox
+  drill. It requires `--allow-github-side-effects`, the allowlisted sandbox
+  repo, `dogfood/` branch prefix, max PRs, max iterations, and max runtime, then
+  writes a receipt without running `gh`, pushing, opening a PR, merging, or
+  launching sessions.
 - `loop-triggers --list|--classify PROMPT [--json]` — List the controlled
   natural-language loop triggers or classify a manager/operator prompt before
   creating a loop policy or continuation gate. Approved trigger phrases include
@@ -1170,6 +1175,7 @@ conveyor qa-run test-coverage-loop --receipt-output /tmp/test-coverage-loop-rece
 conveyor qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json
 conveyor qa-run build-clear-loop --receipt-output /tmp/build-clear-loop-receipt.json --json
 conveyor qa-run setup-bundle-dogfood --receipt-output /tmp/setup-bundle-dogfood-receipt.json --json
+conveyor qa-run setup-bundle-live-sandbox --allow-github-side-effects --github-repo neonwatty/agent-conveyor-dogfood-sandbox --branch-prefix dogfood/ --max-prs 1 --max-iterations 2 --max-runtime-minutes 30 --receipt-output /tmp/setup-bundle-live-sandbox-receipt.json --json
 conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-receipt.json --json
 conveyor loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
 conveyor loop-templates --list --json

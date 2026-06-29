@@ -51,6 +51,26 @@ Required rails:
 - The manager must record post-merge verification and adversarial proof before
   declaring the dogfood complete.
 
+Run the executable live-sandbox preflight before launching manager or worker
+sessions:
+
+```bash
+conveyor qa-run setup-bundle-live-sandbox \
+  --allow-github-side-effects \
+  --github-repo neonwatty/agent-conveyor-dogfood-sandbox \
+  --branch-prefix dogfood/ \
+  --max-prs 1 \
+  --max-iterations 2 \
+  --max-runtime-minutes 30 \
+  --receipt-output /tmp/setup-bundle-live-sandbox-receipt.json \
+  --json
+```
+
+This preflight is intentionally `preflight_only`: it verifies the operator has
+made GitHub side effects explicit and bounded, then writes a receipt and replay
+commands. It does not run `gh`, push a branch, open a PR, merge, or launch
+manager/worker sessions.
+
 Recommended live flow:
 
 ```bash
