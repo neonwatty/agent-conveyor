@@ -6,8 +6,8 @@ description: Draft, preflight, apply, and inspect Agent Conveyor setup bundles f
 # Conveyor Setup Bundle
 
 Use this skill when the operator wants to configure a manager/worker pair or
-worker set with explicit planning, loop, PR review, what's-next, permissions,
-and evidence policy before launch.
+worker set with explicit planning, loop, PR review, what's-next, derived
+permission policy, and evidence policy before launch.
 
 ## Rules
 
@@ -21,6 +21,13 @@ and evidence policy before launch.
   was approved.
 - Do not launch manager or worker sessions until `conveyor setup-bundle show`
   confirms an applied bundle.
+- Ask only for settings that can be encoded with current `setup-bundle` flags.
+  Manager permissions and worker profile shape are derived from the selected
+  preset and must be verified from preview/show output, not customized through
+  intake.
+- If the operator wants multiple workers, collect that as post-bundle launch
+  intent for `conveyor-create-worker-set` after `show` confirms the bundle is
+  applied. Do not present worker count/profile as persisted setup-bundle policy.
 
 ## Conversation Protocol
 
@@ -52,10 +59,11 @@ Ask these in plain language and skip anything the operator has already answered:
 - What's Next Nudging: off, suggest only, or execute bounded.
 - What's Next iteration cap: integer max iteration count.
 - Post-merge What's Next: whether nudging may continue after a successful merge.
-- Manager authority: confirm push branch, open PR, monitor CI, resolve bounded
-  conflicts, merge green PR, compact/clear worker sessions.
-- Worker setup: number of workers, role profile, sandbox expectation, approval
-  policy, and whether review is required before handoff.
+- Manager authority: choose a preset, then verify the derived permissions and
+  denied actions from preview/show output.
+- Worker launch intent: one pair or a worker set. Treat worker-set details as a
+  launch handoff after bundle approval; the current setup bundle records the
+  preset-derived worker policy.
 
 ## Preset Mapping
 

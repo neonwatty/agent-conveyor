@@ -11224,6 +11224,9 @@ test("TypeScript runtime handles Agent Conveyor plugin install status and path c
     assert.match(setupBundleSkill, /--planning-backend/);
     assert.match(setupBundleSkill, /--whats-next-max-iterations/);
     assert.match(setupBundleSkill, /--loop-preset/);
+    assert.match(setupBundleSkill, /Ask only for settings that can be encoded with current `setup-bundle` flags/);
+    assert.match(setupBundleSkill, /Manager permissions and worker profile shape are derived from the selected[\s\S]*preset/);
+    assert.match(setupBundleSkill, /Do not present worker count\/profile as persisted setup-bundle policy/);
     assert.match(setupBundleSkill, /Do not launch manager or worker sessions until[\s\S]*conveyor setup-bundle show[\s\S]*confirms an applied bundle/);
     const installedManifest = JSON.parse(readFileSync(installedManifestPath, "utf8")) as { name: string; version: string };
     assert.equal(installedManifest.name, "agent-conveyor");
