@@ -1025,9 +1025,9 @@ stay out of receipts.
 - `transcript-show <task> [--role R] [--include-content]` — Show stored
   transcript segment metadata. Segment text is redacted unless
   `--include-content` is passed.
-- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers|goalbuddy-conveyor|ship-it-loop>` — Print a
+- `qa-plan <self-management|emergent-criteria|tmux-errors|dispatch-completion|ralph-loop|adversarial-triggers|goalbuddy-conveyor|setup-bundle-dogfood|ship-it-loop>` — Print a
   repeatable manual QA checklist.
-- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|test-coverage-loop|adversarial-triggers|build-clear-loop|ship-it-loop> --receipt-output RECEIPT.json [--path DB]` —
+- `qa-run <ralph-loop-guardrails|generic-loop-template|generic-loop-template-browser|test-coverage-loop|adversarial-triggers|build-clear-loop|setup-bundle-dogfood|ship-it-loop> --receipt-output RECEIPT.json [--path DB]` —
   Run a deterministic no-tmux QA harness and save a JSON receipt.
   `ralph-loop-guardrails` proves max-iteration cutoff, missing-evidence
   cutoff, fresh retry delivery after structured `adversarial_check` evidence,
@@ -1051,6 +1051,10 @@ stay out of receipts.
   permissions are granted, then proves the `ship_it_loop` lifecycle blocks
   before branch, PR, CI, mergeability, manager decision, merge, post-merge, and
   adversarial receipts exist.
+  `setup-bundle-dogfood` proves setup-bundle preview/apply/show rails with temp
+  ledgers, temp Codex homes, and a disposable local fixture repo. It is CI-safe:
+  no GitHub side effects and no manager/worker session launch. For the live
+  sandbox drill, see `docs/qa/setup-bundle-dogfood.md`.
 - `loop-triggers --list|--classify PROMPT [--json]` — List the controlled
   natural-language loop triggers or classify a manager/operator prompt before
   creating a loop policy or continuation gate. Approved trigger phrases include
@@ -1157,6 +1161,7 @@ conveyor qa-plan dispatch-completion
 conveyor qa-plan ralph-loop
 conveyor qa-plan adversarial-triggers
 conveyor qa-plan goalbuddy-conveyor
+conveyor qa-plan setup-bundle-dogfood
 conveyor qa-plan ship-it-loop
 conveyor qa-run ralph-loop-guardrails --receipt-output /tmp/ralph-loop-guardrails-receipt.json --json
 conveyor qa-run generic-loop-template --receipt-output /tmp/generic-loop-template-receipt.json --json
@@ -1164,6 +1169,7 @@ conveyor qa-run generic-loop-template-browser --receipt-output /tmp/generic-loop
 conveyor qa-run test-coverage-loop --receipt-output /tmp/test-coverage-loop-receipt.json --json
 conveyor qa-run adversarial-triggers --receipt-output /tmp/adversarial-triggers-receipt.json --json
 conveyor qa-run build-clear-loop --receipt-output /tmp/build-clear-loop-receipt.json --json
+conveyor qa-run setup-bundle-dogfood --receipt-output /tmp/setup-bundle-dogfood-receipt.json --json
 conveyor qa-run ship-it-loop --receipt-output /tmp/ship-it-loop-receipt.json --json
 conveyor loop-triggers --classify "Run this as an adversarially gated Ralph loop." --json
 conveyor loop-templates --list --json

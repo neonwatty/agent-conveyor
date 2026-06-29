@@ -1360,6 +1360,29 @@ test("setup-bundle show confirms stored policy from ledger", () => {
   }
 });
 
+test("TypeScript runtime qa-plan documents setup bundle dogfood rails", () => {
+  const result = runTypescriptRuntimeCommand({
+    args: ["qa-plan", "setup-bundle-dogfood", "--json"],
+    env: {},
+  });
+  assert.equal(result.exitCode, 0, result.stderr);
+  const payload = JSON.parse(result.stdout ?? "{}") as {
+    acceptance_criteria: string[];
+    authority_boundaries: string[];
+    correlation_markers: Array<{ correlation_id: string; purpose: string }>;
+    expected_observations: string[];
+    scenario: string;
+    steps: string[];
+  };
+  assert.equal(payload.scenario, "setup-bundle-dogfood");
+  assert.ok(payload.authority_boundaries.some((item) => item.includes("No GitHub side effects")));
+  assert.ok(payload.authority_boundaries.some((item) => item.includes("Do not launch manager or worker sessions")));
+  assert.ok(payload.steps.some((item) => item.includes("preview is read-only")));
+  assert.ok(payload.expected_observations.some((item) => item.includes("missing required Superpowers review backend blocks")));
+  assert.ok(payload.acceptance_criteria.some((item) => item.includes("setup-bundle show is ledger truth")));
+  assert.ok(payload.correlation_markers.some((item) => item.correlation_id === "setup-bundle-dogfood-missing-backend"));
+});
+
 test("unknown TypeScript runtime command fails without Python fallback", () => {
   const result = runTypescriptRuntimeCommand({
     args: ["adversarial-check", "--json"],
@@ -4911,6 +4934,75 @@ test("TypeScript runtime handles qa-plan by default", () => {
   });
   assert.equal(extraArg.exitCode, 2);
   assert.match(extraArg.stderr ?? "", /Unexpected argument: extra/);
+});
+
+test("TypeScript runtime qa-run setup-bundle-dogfood writes CI-safe receipt", () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-conveyor-setup-bundle-dogfood."));
+  try {
+    const dbPath = join(root, "workerctl.db");
+    const receiptPath = join(root, "setup-bundle-dogfood-receipt.json");
+    const result = runTypescriptRuntimeCommand({
+      args: ["qa-run", "setup-bundle-dogfood", "--path", dbPath, "--receipt-output", receiptPath, "--json"],
+      env: {},
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok(existsSync(receiptPath));
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
+      artifacts: { db_path: string; fixture_repo: string };
+      checks: Array<{ name: string; status: string }>;
+      generated_tasks: Array<{ task_name: string }>;
+      live_sandbox: { enabled: boolean; reason: string };
+      replay_commands: string[];
+      result: string;
+      scenario: string;
+    };
+    assert.equal(receipt.scenario, "setup-bundle-dogfood");
+    assert.equal(receipt.result, "passed");
+    assert.equal(receipt.artifacts.db_path, dbPath);
+    assert.ok(existsSync(receipt.artifacts.fixture_repo));
+    assert.equal(receipt.live_sandbox.enabled, false);
+    assert.match(receipt.live_sandbox.reason, /CI-safe/);
+    for (const name of [
+      "all_preset_previews_are_read_only",
+      "missing_superpowers_review_backend_blocks_before_launch",
+      "autonomous_ship_it_apply_persists_setup_and_manager_config",
+      "setup_bundle_show_matches_applied_hash",
+      "worker_set_intent_is_handoff_only",
+      "no_sessions_created_during_dogfood",
+    ]) {
+      assert.ok(receipt.checks.some((check) => check.name === name && check.status === "passed"), name);
+    }
+    assert.ok(receipt.replay_commands.some((command) => command.includes("conveyor setup-bundle preview")));
+    assert.ok(receipt.replay_commands.some((command) => command.includes("conveyor setup-bundle show")));
+    assert.ok(receipt.replay_commands.some((command) => command.includes("conveyor pair") && command.includes("--dry-run")));
+
+    const proofDb = openDatabaseSync(dbPath);
+    try {
+      assert.equal((proofDb.prepare("select count(*) as count from sessions").get() as { count: number }).count, 0);
+      assert.equal((proofDb.prepare("select count(*) as count from setup_bundles").get() as { count: number }).count >= 1, true);
+    } finally {
+      proofDb.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup bundle dogfood docs describe local and live rails", () => {
+  const guide = readFileSync("docs/qa/setup-bundle-dogfood.md", "utf8");
+  assert.match(guide, /Local CI-safe dogfood/);
+  assert.match(guide, /Live GitHub sandbox dogfood/);
+  assert.match(guide, /agent-conveyor-dogfood-sandbox/);
+  assert.match(guide, /dogfood\//);
+  assert.match(guide, /--allow-github-side-effects/);
+  assert.match(guide, /setup-bundle show/);
+  assert.match(guide, /adversarial proof/);
+
+  const readme = readFileSync("README.md", "utf8");
+  assert.match(readme, /qa-run setup-bundle-dogfood/);
+
+  const checklist = readFileSync("docs/manual-qa-checklist.md", "utf8");
+  assert.match(checklist, /setup-bundle-dogfood-receipt/);
 });
 
 test("TypeScript runtime qa-run writes deterministic receipts and rejects dirty continue queues by default", () => {
