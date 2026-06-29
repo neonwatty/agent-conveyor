@@ -4988,6 +4988,23 @@ test("TypeScript runtime qa-run setup-bundle-dogfood writes CI-safe receipt", ()
   }
 });
 
+test("setup bundle dogfood docs describe local and live rails", () => {
+  const guide = readFileSync("docs/qa/setup-bundle-dogfood.md", "utf8");
+  assert.match(guide, /Local CI-safe dogfood/);
+  assert.match(guide, /Live GitHub sandbox dogfood/);
+  assert.match(guide, /agent-conveyor-dogfood-sandbox/);
+  assert.match(guide, /dogfood\//);
+  assert.match(guide, /--allow-github-side-effects/);
+  assert.match(guide, /setup-bundle show/);
+  assert.match(guide, /adversarial proof/);
+
+  const readme = readFileSync("README.md", "utf8");
+  assert.match(readme, /qa-run setup-bundle-dogfood/);
+
+  const checklist = readFileSync("docs/manual-qa-checklist.md", "utf8");
+  assert.match(checklist, /setup-bundle-dogfood-receipt/);
+});
+
 test("TypeScript runtime qa-run writes deterministic receipts and rejects dirty continue queues by default", () => {
   const root = mkdtempSync(join(tmpdir(), "agent-conveyor-ts-qa-run."));
   try {
