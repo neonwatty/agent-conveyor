@@ -5795,6 +5795,7 @@ const QA_PLAN_SCENARIOS = new Set([
   "dispatch-completion",
   "ralph-loop",
   "ship-it-loop",
+  "setup-bundle-dogfood",
   "adversarial-triggers",
   "goalbuddy-conveyor",
 ]);
@@ -5807,6 +5808,47 @@ function qaPlan(scenario: string): QaPlan {
     "Run conveyor audit <task> and conveyor replay <task>; verify the evidence chain is present.",
     "Run conveyor reconcile --stale-cycles-seconds 1 and git status --short --branch after cleanup.",
   ];
+  if (scenario === "setup-bundle-dogfood") {
+    return {
+      acceptance_criteria: [
+        "setup-bundle preview is read-only for every supported setup preset",
+        "missing required Superpowers review backend blocks before launch",
+        "approved setup bundles are persisted and setup-bundle show is ledger truth",
+        "manager permissions and worker policy are derived from the selected preset",
+        "worker-set intent remains a launch handoff and is not silently persisted as setup-bundle worker count",
+      ],
+      authority_boundaries: [
+        "No GitHub side effects: do not run gh, do not push, do not create a PR, and do not merge.",
+        "Do not launch manager or worker sessions during the CI-safe dogfood.",
+        "Use only temp ledgers, temp Codex homes, and disposable local fixture repositories.",
+        "Treat preview/apply/show JSON and direct SQLite inspection as proof, not generated summaries.",
+      ],
+      correlation_markers: [
+        { correlation_id: "setup-bundle-dogfood-preview-readonly", purpose: "preview does not write setup_bundles" },
+        { correlation_id: "setup-bundle-dogfood-missing-backend", purpose: "required review backend fails closed" },
+        { correlation_id: "setup-bundle-dogfood-applied-readback", purpose: "show readback matches applied setup hash" },
+        { correlation_id: "setup-bundle-dogfood-no-launch", purpose: "handoff is replay-only and no sessions are launched" },
+      ],
+      expected_observations: [
+        "preview is read-only for autonomous, test coverage, UX, and PR/CI/merge presets",
+        "missing required Superpowers review backend blocks with zero manager configs",
+        "applied autonomous setup writes one setup bundle and one manager config",
+        "setup-bundle show returns the same approved hash and policy used by apply",
+        "receipt replay commands describe launch handoff without launching sessions",
+      ],
+      scenario,
+      starter_prompt: "Run the CI-safe setup-bundle dogfood before trying live autonomous ship-it work.",
+      steps: [
+        "Create a temp fixture repo and temp Conveyor ledger.",
+        "Create setup tasks for each preset.",
+        "Preview each preset and verify preview is read-only.",
+        "Apply a missing required Superpowers PR review setup and verify it blocks before manager config creation.",
+        "Apply an autonomous ship-it setup with satisfied required skills and verify setup-bundle show readback.",
+        "Record replay-only pair and worker-set launch handoff commands.",
+        "Write a receipt with checks, artifact paths, and replay commands.",
+      ],
+    };
+  }
   if (scenario === "self-management") {
     return {
       expected_observations: [
@@ -6106,6 +6148,7 @@ const SUPPORTED_QA_RUN_SCENARIOS = new Set([
   "generic-loop-template",
   "generic-loop-template-browser",
   "ralph-loop-guardrails",
+  "setup-bundle-dogfood",
   "ship-it-loop",
   "test-coverage-loop",
 ]);
